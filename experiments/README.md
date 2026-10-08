@@ -28,7 +28,7 @@ five native timing and host-memory runs per configuration. Details are in
 
 | File | Responsibility |
 |---|---|
-| `search/export.c` | Export the five read-only tables selected for the root C solver |
+| `search/export.c` | Export the five read-only tables, including precomputed subgroup offsets, for the C solver |
 | `search/compare.c` | Parse arguments, select inputs, verify answers, and report results |
 | `search/profile.c` | Separate setup/search timing and logical operation counts for modes 1 and 7 |
 | `search/cube.c` | Adapt the baseline's move, rank, parse, and inverse operations |
@@ -151,3 +151,13 @@ vectors and error handling. Vector checks accept any shortest solution;
 commands are provided by `build/solver-verify` (`--self-test`, `--verify-all`,
 and `--verify-hard`). Table generation and verification allocate host memory;
 the runtime search uses fixed records and no explicit heap allocation.
+
+The optimized C verifier also reports search passes, face groups, root trials,
+and root steps. With unchanged traversal and one solved goal per hard input,
+child-record initializations are expanded nodes minus root passes, and path
+writes add one per solved goal. Search remainder reads equal generated children;
+root remainder reads equal root trials plus input count. These figures agree
+with a separate instrumented source audit. The index map now holds 32-bit
+precomputed offsets rather than one-byte class identifiers; five table payloads
+total 95,567 bytes. Six row pointers and twelve fixed records are additional
+static data. Final RV32I linked sizes and instruction costs remain unmeasured.

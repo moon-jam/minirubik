@@ -6,6 +6,7 @@
 
 #include "../experiments/search/cube.h"
 #include <assert.h>
+#include <stdlib.h>
 #include <time.h>
 void tables_prepare(_Bool verify_modulo3);
 void tables_free(void);
@@ -71,6 +72,29 @@ static int self_test(void)
     for (unsigned i = 0; i < 3; ++i)
         if (solve_cube(cases[i], &solution) != lengths[i])
             return 0;
+    for (unsigned length = 0; length < 14; ++length) {
+        char *input = malloc(length + 1);
+        assert(input);
+        memcpy(input, cases[0], length);
+        input[length] = 0;
+        int result = solve_cube(input, &solution);
+        free(input);
+        if (result != -2)
+            return 0;
+    }
+    if (solve_cube(NULL, &solution) != -2 || solve_cube(cases[0], NULL) != -2)
+        return 0;
+    for (unsigned rank = 0; rank < 2187; ++rank) {
+        unsigned value = rank, sum = 0;
+        state = solved;
+        for (unsigned i = 0; i < CUBIES; ++i) {
+            state.o[i] = value % 3;
+            value /= 3;
+            sum += state.o[i];
+        }
+        if (valid(&state) != (sum % 3 == 0))
+            return 0;
+    }
     return 1;
 }
 
@@ -118,7 +142,8 @@ static int verify_all(int hard_only)
     tables_prepare(1);
     assert(memcmp(permutation_transitions, pt, sizeof pt) == 0);
     assert(memcmp(orientation_transitions, ot, sizeof ot) == 0);
-    assert(memcmp(permutation_class, pc, sizeof pc) == 0);
+    for (unsigned p = 0; p < PERMUTATIONS; ++p)
+        assert(subgroup_offset[p] == (unsigned) pc[p] * ORIENTATIONS);
     assert(memcmp(permutation_distance, pd, sizeof pd) == 0);
     assert(memcmp(subgroup_remainder, hm, sizeof hm) == 0);
     /* Independently check the maintained cube operations against the snapshot. */
@@ -141,6 +166,7 @@ static int verify_all(int hard_only)
     }
     unsigned hmax = 0, pmax = 0, hard = 0, checked = 0;
     uint64_t hard_attempts = 0, hard_expanded = 0, worst_attempts = 0;
+    uint64_t hard_passes = 0, hard_faces = 0, hard_trials = 0, hard_steps = 0;
     solution_t solution;
     for (unsigned rank = 0; rank < STATES; ++rank) {
         if (hard_only && exact[rank] != MAX_DEPTH)
@@ -152,7 +178,8 @@ static int verify_all(int hard_only)
         unsigned h = (hp[key >> 1] >> ((key & 1U) * 4U)) & 15U;
         unsigned dp = permutation_bound(p);
         assert(half_remainder(p, o) == h % 3);
-        assert(root_half_distance((coordinate_t) {p, o}) == (int) h);
+        assert(root_half_distance((coordinate_t) {p, o}, half_remainder(p, o)) ==
+               (int) h);
         assert(h <= exact[rank] && dp <= exact[rank]);
         if (h > hmax) hmax = h;
         if (dp > pmax) pmax = dp;
@@ -165,6 +192,10 @@ static int verify_all(int hard_only)
             ++hard;
             hard_attempts += attempts;
             hard_expanded += expanded;
+            hard_passes += passes;
+            hard_faces += face_groups;
+            hard_trials += root_trials;
+            hard_steps += root_steps;
             if (attempts > worst_attempts) worst_attempts = attempts;
         }
         for (unsigned i = 0; i < solution.length; ++i)
@@ -189,6 +220,8 @@ static int verify_all(int hard_only)
     /* Same move order and bound as the selected recursive prototype. */
     assert(hard_attempts == 9567748 && hard_expanded == 1606138 &&
            worst_attempts == 14649);
+    assert(hard_passes == 8028 && hard_faces == 3200306 &&
+           hard_trials == 106054 && hard_steps == 23700);
     assert(solve_cube("21345671111111", &solution) == MAX_DEPTH);
     uint64_t designated_attempts = attempts;
     assert(designated_attempts == 4095);
@@ -198,10 +231,26 @@ static int verify_all(int hard_only)
     printf("{\"states_verified\":%u,\"hard_inputs\":%u,"
            "\"hard_attempts\":%llu,\"max_attempts\":%llu,"
            "\"designated_attempts\":%llu,\"permutation_max\":%u,"
-           "\"subgroup_max\":%u,\"wall_seconds\":%.6f}\n",
+           "\"subgroup_max\":%u,\"search_passes\":%llu,"
+           "\"face_groups\":%llu,\"root_trials\":%llu,\"root_steps\":%llu,"
+           "\"child_records\":%llu,\"path_writes\":%llu,"
+           "\"search_remainder_reads\":%llu,\"root_remainder_reads\":%llu,"
+           "\"table_bytes\":%zu,\"frame_bytes\":%zu,"
+           "\"row_pointer_bytes\":%zu,\"wall_seconds\":%.6f}\n",
            checked, hard, (unsigned long long) hard_attempts,
            (unsigned long long) worst_attempts,
-           (unsigned long long) designated_attempts, pmax, hmax, seconds);
+           (unsigned long long) designated_attempts, pmax, hmax,
+           (unsigned long long) hard_passes, (unsigned long long) hard_faces,
+           (unsigned long long) hard_trials, (unsigned long long) hard_steps,
+           (unsigned long long) (hard_expanded - hard_passes),
+           (unsigned long long) (hard_expanded - hard_passes + hard),
+           (unsigned long long) hard_attempts,
+           (unsigned long long) (hard_trials + hard),
+           sizeof permutation_transitions + sizeof orientation_transitions +
+               sizeof subgroup_offset + sizeof permutation_distance +
+               sizeof subgroup_remainder,
+           sizeof frames, sizeof permutation_rows + sizeof orientation_rows,
+           seconds);
     tables_free();
     return output_failed();
 }

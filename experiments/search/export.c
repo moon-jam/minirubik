@@ -29,6 +29,17 @@ static void emit_bytes(const char *name, const uint8_t *data, unsigned count)
     puts("};");
 }
 
+static void emit_offsets(void)
+{
+    printf("static const uint32_t subgroup_offset[%u] = {\n", PERMUTATIONS);
+    for (unsigned i = 0; i < PERMUTATIONS; ++i) {
+        if (i % 12 == 0) fputs("    ", stdout);
+        printf("%u,", (unsigned) pc[i] * ORIENTATIONS);
+        if (i % 12 == 11) putchar('\n');
+    }
+    puts("};");
+}
+
 int main(void)
 {
     tables_prepare(1);
@@ -37,7 +48,7 @@ int main(void)
     const uint16_t *o[3] = {ot[0], ot[1], ot[2]};
     emit_transitions("permutation_transitions", p, PERMUTATIONS);
     emit_transitions("orientation_transitions", o, ORIENTATIONS);
-    emit_bytes("permutation_class", pc, sizeof pc);
+    emit_offsets();
     emit_bytes("permutation_distance", pd, sizeof pd);
     emit_bytes("subgroup_remainder", hm, sizeof hm);
     tables_free();
