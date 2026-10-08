@@ -1,6 +1,9 @@
 #include <stdint.h>
+
+#ifndef RV32I_REFERENCE
 #include <stdio.h>
 #include <string.h>
+#endif
 
 enum {
     CUBIES = 7,
@@ -408,6 +411,7 @@ int solve_cube(const char *input, solution_t *solution)
     return is_solved(&state) ? length : -1;
 }
 
+#ifndef RV32I_REFERENCE
 /* Buffered output errors may surface only at the flush. */
 static int output_failed(void)
 {
@@ -433,3 +437,4 @@ int main(int argc, char **argv)
     putchar('\n');
     return output_failed();
 }
+#endif
