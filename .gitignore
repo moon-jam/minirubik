@@ -5,3 +5,6 @@ solver
 mini
 /build/
 /compile_commands.json
+/solver-gcc-O2.s
+/solver-gcc-O2.elf
+/solver-gcc-O2-*.txt

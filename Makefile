@@ -11,6 +11,11 @@ BUILD := build
 TABLE_GENERATOR := $(BUILD)/generate-tables
 TABLES := $(BUILD)/solver-tables.inc
 VERIFY_SOLVER := $(BUILD)/solver-verify
+CROSS_CC ?= riscv64-unknown-elf-gcc
+RIPES_BIN ?= /Applications/Ripes-v2.2.6-106-g5b8a616-mac-universal2.app/Contents/MacOS/Ripes
+RV32_ASM := $(BUILD)/solver-gcc-O2.s
+RV32_ELF := $(BUILD)/solver-gcc-O2.elf
+RV32_CHECK := $(BUILD)/rv32-check
 HOST_TABLE_SOURCES := experiments/search/cube.c experiments/search/tables.c \
                       experiments/search/bounds.c
 HOST_TABLE_HEADERS := experiments/search/cube.h experiments/search/tables.h \
@@ -20,7 +25,7 @@ HOST_TABLE_HEADERS := experiments/search/cube.h experiments/search/tables.h \
 INVALID_STATES := 1234567111111 123456711111111 02345671111111 82345671111111 \
 	12345671111110 12345671111114 1234567111111a 11345671111111 12345671111112
 
-.PHONY: all check verify prove clean indent
+.PHONY: all check verify check-rv32 check-rv32-quick prove clean indent
 
 all: solver mini
 
@@ -47,6 +52,25 @@ $(VERIFY_SOLVER): tests/verify.c solver.c $(TABLES) $(HOST_TABLE_SOURCES) \
 
 verify: $(VERIFY_SOLVER)
 	./$(VERIFY_SOLVER) --verify-all
+
+$(RV32_ASM): solver.c $(TABLES)
+	$(CROSS_CC) -O2 -march=rv32i -mabi=ilp32 -ffreestanding \
+		-DRV32I_REFERENCE -I$(BUILD) -S $< -o $@
+
+$(RV32_ELF): runner.s $(RV32_ASM)
+	$(CROSS_CC) -march=rv32i -mabi=ilp32 -nostdlib -nostartfiles \
+		-Wl,--no-relax,-e,_start $^ -o $@
+
+$(RV32_CHECK): tests/rv32-check.c $(HOST_TABLE_SOURCES) $(HOST_TABLE_HEADERS) \
+               experiments/baseline/solver.c | $(BUILD)
+	$(CC) $(CFLAGS) -Iexperiments/search $< $(HOST_TABLE_SOURCES) -o $@
+
+# Host-side driver: patch only the ELF input, then execute each case in Ripes.
+check-rv32: $(RV32_ELF) $(RV32_CHECK) $(VECTORS)
+	./$(RV32_CHECK) full "$(RIPES_BIN)" $(RV32_ELF) $(BUILD)/rv32-full
+
+check-rv32-quick: $(RV32_ELF) $(RV32_CHECK)
+	./$(RV32_CHECK) quick "$(RIPES_BIN)" $(RV32_ELF) $(BUILD)/rv32-quick
 
 mini: mini.c
 	$(CC) $(CFLAGS) $< -o $@
