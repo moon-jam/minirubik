@@ -14,8 +14,10 @@ VERIFY_SOLVER := $(BUILD)/solver-verify
 CROSS_CC ?= riscv64-unknown-elf-gcc
 RIPES_BIN ?= /Applications/Ripes-v2.2.6-106-g5b8a616-mac-universal2.app/Contents/MacOS/Ripes
 RV32_ASM := $(BUILD)/solver-gcc-O2.s
+RV32_DATA := $(BUILD)/solver-data.inc
 RV32_ELF := $(BUILD)/solver-gcc-O2.elf
 RV32_CHECK := $(BUILD)/rv32-check
+ASM_ELF := $(BUILD)/solver-rv32i.elf
 HOST_TABLE_SOURCES := experiments/search/cube.c experiments/search/tables.c \
                       experiments/search/bounds.c
 HOST_TABLE_HEADERS := experiments/search/cube.h experiments/search/tables.h \
@@ -25,7 +27,7 @@ HOST_TABLE_HEADERS := experiments/search/cube.h experiments/search/tables.h \
 INVALID_STATES := 1234567111111 123456711111111 02345671111111 82345671111111 \
 	12345671111110 12345671111114 1234567111111a 11345671111111 12345671111112
 
-.PHONY: all check verify check-rv32 check-rv32-quick prove clean indent
+.PHONY: all check verify check-rv32 check-rv32-quick check-asm check-asm-quick prove clean indent
 
 all: solver mini
 
@@ -61,6 +63,12 @@ $(RV32_ELF): runner.s $(RV32_ASM)
 	$(CROSS_CC) -march=rv32i -mabi=ilp32 -nostdlib -nostartfiles \
 		-Wl,--no-relax,-e,_start $^ -o $@
 
+# Read-only host-generated data for the hand-written assembly.
+$(RV32_DATA): $(RV32_ASM)
+	awk '/^[[:space:]]*\.section[[:space:]]+\.rodata([[:space:]]|$$)/ { copy = 1 } \
+		copy && /^[[:space:]]*\.bss([[:space:]]|$$)/ { exit } \
+		copy { print }' $< > $@
+
 $(RV32_CHECK): tests/rv32-check.c $(HOST_TABLE_SOURCES) $(HOST_TABLE_HEADERS) \
                experiments/baseline/solver.c | $(BUILD)
 	$(CC) $(CFLAGS) -Iexperiments/search $< $(HOST_TABLE_SOURCES) -o $@
@@ -71,6 +79,16 @@ check-rv32: $(RV32_ELF) $(RV32_CHECK) $(VECTORS)
 
 check-rv32-quick: $(RV32_ELF) $(RV32_CHECK)
 	./$(RV32_CHECK) quick "$(RIPES_BIN)" $(RV32_ELF) $(BUILD)/rv32-quick
+
+$(ASM_ELF): runner.s solver-rv32i.s $(RV32_DATA)
+	$(CROSS_CC) -march=rv32i -mabi=ilp32 -nostdlib -nostartfiles \
+		-Wl,--no-relax,-e,_start runner.s solver-rv32i.s -o $@
+
+check-asm: $(ASM_ELF) $(RV32_CHECK) $(VECTORS)
+	./$(RV32_CHECK) full "$(RIPES_BIN)" $(ASM_ELF) $(BUILD)/hand-full
+
+check-asm-quick: $(ASM_ELF) $(RV32_CHECK)
+	./$(RV32_CHECK) quick "$(RIPES_BIN)" $(ASM_ELF) $(BUILD)/hand-quick
 
 mini: mini.c
 	$(CC) $(CFLAGS) $< -o $@
