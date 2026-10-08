@@ -7,30 +7,60 @@ C_SOURCES := $(wildcard *.c *.h)
 SAMPLE_STATE := 21345671111111
 SAMPLE_SOLUTION := B' R' D2 R' B R B' R D2 B R'
 VECTORS := tests/solutions.txt
+BUILD := build
+TABLE_GENERATOR := $(BUILD)/generate-tables
+TABLES := $(BUILD)/solver-tables.inc
+VERIFY_SOLVER := $(BUILD)/solver-verify
+HOST_TABLE_SOURCES := experiments/search/cube.c experiments/search/tables.c \
+                      experiments/search/bounds.c
+HOST_TABLE_HEADERS := experiments/search/cube.h experiments/search/tables.h \
+                      experiments/search/bounds.h
 # One per rejection path: short, long, cubie digit low, cubie digit high,
 # orientation digit low, orientation digit high, non-digit, duplicate, parity.
 INVALID_STATES := 1234567111111 123456711111111 02345671111111 82345671111111 \
 	12345671111110 12345671111114 1234567111111a 11345671111111 12345671111112
 
-.PHONY: all check prove clean indent
+.PHONY: all check verify prove clean indent
 
 all: solver mini
 
-solver: solver.c
-	$(CC) $(CFLAGS) $< -o $@
+$(BUILD):
+	mkdir -p $@
+
+$(TABLE_GENERATOR): experiments/search/export.c $(HOST_TABLE_SOURCES) \
+                    $(HOST_TABLE_HEADERS) \
+                    experiments/baseline/solver.c | $(BUILD)
+	$(CC) $(CFLAGS) experiments/search/export.c \
+		$(HOST_TABLE_SOURCES) -o $@
+
+$(TABLES): $(TABLE_GENERATOR)
+	@set -eu; trap 'rm -f "$@.tmp"' 0 1 2 15; \
+		$(TABLE_GENERATOR) > "$@.tmp"; mv "$@.tmp" "$@"
+
+solver: solver.c $(TABLES)
+	$(CC) $(CFLAGS) -I$(BUILD) $< -o $@
+
+$(VERIFY_SOLVER): tests/verify.c solver.c $(TABLES) $(HOST_TABLE_SOURCES) \
+                  $(HOST_TABLE_HEADERS) experiments/baseline/solver.c
+	$(CC) $(CFLAGS) -I$(BUILD) tests/verify.c \
+		$(HOST_TABLE_SOURCES) -o $@
+
+verify: $(VERIFY_SOLVER)
+	./$(VERIFY_SOLVER) --verify-all
 
 mini: mini.c
 	$(CC) $(CFLAGS) $< -o $@
 
-check: solver mini $(VECTORS)
-	./solver --self-test
+check: solver mini $(VECTORS) verify
+	./$(VERIFY_SOLVER) --self-test
 	@expected=$$(mktemp); actual=$$(mktemp); \
 		trap 'rm -f "$$expected" "$$actual"' 0 1 2 15; \
 		count=0; \
 		while IFS='|' read -r state solution; do \
 			case "$$state" in ""|\#*) continue ;; esac; \
 			printf '%s\n' "$$solution" >"$$expected"; \
-			for binary in ./solver ./mini; do \
+			./$(VERIFY_SOLVER) --check-solution "$$state" "$$solution" || exit 1; \
+			for binary in ./mini; do \
 				$$binary "$$state" >"$$actual"; \
 				status=$$?; \
 				test $$status -eq 0 || { \
@@ -44,7 +74,7 @@ $$(wc -c <"$$actual") produced)"; exit 1; }; \
 			done; \
 			count=$$((count + 1)); \
 		done <$(VECTORS); \
-		echo "$$count solution vectors matched by solver and mini"
+		echo "$$count vectors: solver lengths/replay checked; mini output matched"
 	@for binary in ./solver ./mini; do \
 		for bad in $(INVALID_STATES); do \
 			$$binary "$$bad" >/dev/null 2>&1; \
@@ -68,16 +98,17 @@ $$(wc -c <"$$actual") produced)"; exit 1; }; \
 			echo "$$binary with stdout closed: expected status 1, got $$status"; \
 			exit 1; }; \
 	done
-	@./solver --self-test >&- 2>/dev/null; \
+	@./$(VERIFY_SOLVER) --self-test >&- 2>/dev/null; \
 		status=$$?; \
 		test $$status -eq 1 || { \
 			echo "solver --self-test with stdout closed: expected 1, got $$status"; \
 			exit 1; }
 	@echo "invalid input rejected with status 2, unwritable stdout with status 1"
 
-prove: solver.c
+prove: solver.c $(TABLES)
 	@log=$$(mktemp); trap 'rm -f "$$log"' 0 1 2 15; \
-		$(FRAMA_C) -wp -wp-fct quarter_turn,rank_state,valid,parse_state \
+		$(FRAMA_C) -cpp-extra-args=-I$(BUILD) -wp \
+		-wp-fct quarter_turn,encode_state,valid,parse_state \
 		-wp-rte -rte-verbose 0 -wp-prover alt-ergo -wp-timeout 20 \
 		-wp-cache none solver.c >"$$log" 2>&1; rc=$$?; \
 		grep -Fvx -e '[wp] Warning: Skipped RTE guards: unaligned pointers (\aligned not supported)' \
@@ -95,3 +126,4 @@ endif
 
 clean:
 	$(RM) solver mini
+	$(RM) -r $(BUILD)

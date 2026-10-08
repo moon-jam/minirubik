@@ -28,6 +28,7 @@ five native timing and host-memory runs per configuration. Details are in
 
 | File | Responsibility |
 |---|---|
+| `search/export.c` | Export the five read-only tables selected for the root C solver |
 | `search/compare.c` | Parse arguments, select inputs, verify answers, and report results |
 | `search/profile.c` | Separate setup/search timing and logical operation counts for modes 1 and 7 |
 | `search/cube.c` | Adapt the baseline's move, rank, parse, and inverse operations |
@@ -129,3 +130,24 @@ and `profile-time-MODE-run-N.json` in `search/build/`. All returned answers are
 checked against the exact BFS reference and replayed outside timing. Equal
 attempt counts establish equal search work, while these additional measures
 show lookup and reconstruction overhead; RV32I costs require target runs.
+
+### Building and checking the C solver
+
+The root build uses `search/export.c` to generate the five selected tables
+from the frozen model. The generated include and executables stay in the
+root's ignored `build/` directory. The runtime search is maintained only in
+`solver.c`; `tests/verify.c` includes it to compare against the frozen oracle.
+
+```sh
+make
+make check
+./solver 21345671111111
+```
+
+`make check` verifies bounds, packed lookups, root distances, shortest lengths,
+and path replay across the entire state space, then checks the supplied
+vectors and error handling. Vector checks accept any shortest solution;
+`mini` still matches the original expected move strings. Host diagnostic
+commands are provided by `build/solver-verify` (`--self-test`, `--verify-all`,
+and `--verify-hard`). Table generation and verification allocate host memory;
+the runtime search uses fixed records and no explicit heap allocation.

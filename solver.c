@@ -1,6 +1,5 @@
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 enum {
@@ -8,12 +7,23 @@ enum {
     PERMUTATIONS = 5040,
     ORIENTATIONS = 729,
     STATES = PERMUTATIONS * ORIENTATIONS,
-    MOVES = 9
+    MOVES = 9,
+    HALF_CLASSES = 210,
+    HALF_ENTRIES = HALF_CLASSES * ORIENTATIONS,
+    MAX_DEPTH = 11
 };
 
 typedef struct {
     uint8_t p[CUBIES], o[CUBIES];
 } state_t;
+
+typedef struct {
+    uint16_t p, o;
+} coordinate_t;
+
+typedef struct {
+    uint8_t length, moves[MAX_DEPTH];
+} solution_t;
 
 /*@ predicate valid_state(state_t *state) =
       (\forall integer i; 0 <= i < CUBIES ==>
@@ -26,7 +36,6 @@ typedef struct {
 
 static const char *const move_names[MOVES] = {"R",  "R2", "R'", "B", "B2",
                                               "B'", "D",  "D2", "D'"};
-static const uint8_t inverse_move[MOVES] = {2, 1, 0, 5, 4, 3, 8, 7, 6};
 /* Each destination takes a cubie from source[face][destination]. */
 static const uint8_t source[3][CUBIES] = {
     {1, 4, 2, 0, 3, 5, 6},
@@ -82,9 +91,9 @@ static state_t apply_move(state_t state, uint8_t move)
     requires \forall integer i; 0 <= i < CUBIES ==>
       0 <= state->o[i] < 3;
     assigns \nothing;
-    ensures \result < STATES;
+    ensures \result.p < PERMUTATIONS && \result.o < ORIENTATIONS;
  */
-static uint32_t rank_state(const state_t *state)
+static coordinate_t encode_state(const state_t *state)
 {
     uint32_t p = 0, o = 0;
     /*@ loop invariant 0 <= i <= CUBIES;
@@ -117,30 +126,7 @@ static uint32_t rank_state(const state_t *state)
      */
     for (uint8_t i = 0; i < 6; ++i)
         o = o * 3U + state->o[i];
-    return p * ORIENTATIONS + o;
-}
-
-/*@ requires \valid(state); requires rank < STATES; assigns *state; */
-static void unrank_state(uint32_t rank, state_t *state)
-{
-    uint8_t available[CUBIES] = {0, 1, 2, 3, 4, 5, 6};
-    uint32_t p = rank / ORIENTATIONS, o = rank % ORIENTATIONS, f = 720;
-    uint8_t sum = 0;
-    for (uint8_t i = 0; i < CUBIES; ++i) {
-        uint8_t q = (uint8_t) (p / f);
-        p %= f;
-        state->p[i] = available[q];
-        for (uint8_t j = q; j + 1U < CUBIES - i; ++j)
-            available[j] = available[j + 1U];
-        if (i < 5)
-            f /= 6U - i;
-    }
-    for (uint8_t i = 6; i-- > 0;) {
-        state->o[i] = (uint8_t) (o % 3U);
-        sum = (uint8_t) (sum + state->o[i]);
-        o /= 3U;
-    }
-    state->o[6] = (uint8_t) ((3U - sum % 3U) % 3U);
+    return (coordinate_t) {(uint16_t) p, (uint16_t) o};
 }
 
 /*@ requires \valid_read(state);
@@ -188,68 +174,6 @@ static int valid(const state_t *state)
     return sum % 3U == 0;
 }
 
-static uint8_t *build_table(uint8_t *diameter)
-{
-    uint8_t *toward_solved = malloc(STATES);
-    uint32_t *queue = malloc((size_t) STATES * sizeof *queue);
-    uint16_t permutation[3][PERMUTATIONS], orientation[3][ORIENTATIONS];
-    uint32_t head = 0, tail = 1, level_end = 1;
-    state_t state;
-    if (!toward_solved || !queue) {
-        free(toward_solved);
-        free(queue);
-        return NULL;
-    }
-    for (uint16_t rank = 0; rank < PERMUTATIONS; ++rank) {
-        unrank_state((uint32_t) rank * ORIENTATIONS, &state);
-        for (uint8_t face = 0; face < 3; ++face) {
-            state_t next = quarter_turn(state, face);
-            permutation[face][rank] =
-                (uint16_t) (rank_state(&next) / ORIENTATIONS);
-        }
-    }
-    for (uint16_t rank = 0; rank < ORIENTATIONS; ++rank) {
-        unrank_state(rank, &state);
-        for (uint8_t face = 0; face < 3; ++face) {
-            state_t next = quarter_turn(state, face);
-            orientation[face][rank] =
-                (uint16_t) (rank_state(&next) % ORIENTATIONS);
-        }
-    }
-    memset(toward_solved, UINT8_MAX, STATES);
-    queue[0] = 0;
-    toward_solved[0] = 0;
-    *diameter = 0;
-    while (head < tail) {
-        if (head == level_end) {
-            level_end = tail;
-            ++*diameter;
-        }
-        uint32_t here = queue[head++];
-        uint16_t p = (uint16_t) (here / ORIENTATIONS);
-        uint16_t o = (uint16_t) (here % ORIENTATIONS);
-        for (uint8_t face = 0; face < 3; ++face) {
-            uint16_t next_p = p, next_o = o;
-            for (uint8_t turn = 0; turn < 3; ++turn) {
-                next_p = permutation[face][next_p];
-                next_o = orientation[face][next_o];
-                uint32_t there = (uint32_t) next_p * ORIENTATIONS + next_o;
-                if (toward_solved[there] == UINT8_MAX) {
-                    uint8_t move = (uint8_t) (face * 3U + turn);
-                    toward_solved[there] = inverse_move[move];
-                    queue[tail++] = there;
-                }
-            }
-        }
-    }
-    free(queue);
-    if (tail != STATES) {
-        free(toward_solved);
-        return NULL;
-    }
-    return toward_solved;
-}
-
 /*@ requires valid_read_string(input);
     requires \valid(state);
     assigns state->p[0..6], state->o[0..6];
@@ -289,75 +213,187 @@ static int parse_state(const char *input, state_t *state)
     return input[14] == '\0' && valid(state);
 }
 
-/* stdout is fully buffered off a terminal, so a write error surfaces at the
- * flush, not at the printf that queued the bytes. Every exit path that has
- * produced output goes through here.
+#include "solver-tables.inc"
+
+typedef struct {
+    uint16_t p, o, next_p, next_o;
+    uint8_t distance, previous_face, face, turn;
+    uint8_t next_distance, next_remainder, entered;
+} search_frame_t;
+
+static search_frame_t frames[MAX_DEPTH + 1];
+
+static uint64_t attempts, expanded;
+
+static uint8_t permutation_bound(uint16_t p)
+{
+    return (uint8_t) ((permutation_distance[p >> 1] >> ((p & 1U) * 4U)) & 15U);
+}
+
+static uint8_t half_remainder(uint16_t p, uint16_t o)
+{
+    uint32_t index = (uint32_t) permutation_class[p] * ORIENTATIONS + o;
+    return (uint8_t) ((subgroup_remainder[index >> 2] >>
+                      ((index & 3U) * 2U)) & 3U);
+}
+
+/* Recover the root distance without changing the original input. */
+static int root_half_distance(coordinate_t state)
+{
+    unsigned distance = 0;
+    while (permutation_class[state.p] != 0 || state.o != 0) {
+        uint8_t remainder = half_remainder(state.p, state.o);
+        uint8_t wanted = remainder == 0 ? 2 : (uint8_t) (remainder - 1);
+        int found = 0;
+        for (unsigned face = 0; face < 3 && !found; ++face) {
+            coordinate_t next = state;
+            for (unsigned turn = 0; turn < 3; ++turn) {
+                next.p = permutation_transitions[face][next.p];
+                next.o = orientation_transitions[face][next.o];
+                if (half_remainder(next.p, next.o) == wanted) {
+                    state = next;
+                    found = 1;
+                    break;
+                }
+            }
+        }
+        if (!found || ++distance > MAX_DEPTH)
+            return -1;
+    }
+    return (int) distance;
+}
+
+/* Each frame resumes its face/turn loop after a child returns. */
+static int search(coordinate_t root, solution_t *solution)
+{
+    attempts = expanded = 0;
+    int distance = root_half_distance(root);
+    if (distance < 0)
+        return -1;
+    unsigned first_bound = permutation_bound(root.p);
+    if ((unsigned) distance > first_bound)
+        first_bound = (unsigned) distance;
+    for (unsigned bound = first_bound; bound <= MAX_DEPTH; ++bound) {
+        unsigned depth = 0;
+        frames[0] = (search_frame_t) {
+            .p = root.p, .o = root.o, .distance = (uint8_t) distance,
+            .previous_face = 3
+        };
+        for (;;) {
+            search_frame_t *frame = &frames[depth];
+            if (!frame->entered) {
+                unsigned h = permutation_bound(frame->p);
+                if (frame->distance > h)
+                    h = frame->distance;
+                if (depth + h > bound) {
+                    if (depth == 0)
+                        break;
+                    --depth;
+                    continue;
+                }
+                if (frame->p == 0 && frame->o == 0) {
+                    solution->length = (uint8_t) depth;
+                    return (int) depth;
+                }
+                if (depth == bound) {
+                    if (depth == 0)
+                        break;
+                    --depth;
+                    continue;
+                }
+                frame->entered = 1;
+                ++expanded;
+            }
+            if (frame->face < 3 && frame->face == frame->previous_face) {
+                ++frame->face;
+                frame->turn = 0;
+            }
+            if (frame->face == 3) {
+                if (depth == 0)
+                    break;
+                --depth;
+                continue;
+            }
+            unsigned face = frame->face;
+            if (frame->turn == 0) {
+                frame->next_p = frame->p;
+                frame->next_o = frame->o;
+                frame->next_distance = frame->distance;
+                frame->next_remainder = half_remainder(frame->p, frame->o);
+            }
+            frame->next_p = permutation_transitions[face][frame->next_p];
+            frame->next_o = orientation_transitions[face][frame->next_o];
+            uint8_t remainder = half_remainder(frame->next_p, frame->next_o);
+            int delta = (int) remainder - frame->next_remainder;
+            if (delta == -2)
+                delta = 1;
+            else if (delta == 2)
+                delta = -1;
+            frame->next_distance = (uint8_t) (frame->next_distance + delta);
+            frame->next_remainder = remainder;
+            ++attempts;
+            solution->moves[depth] = (uint8_t) (face * 3U + frame->turn);
+            if (++frame->turn == 3) {
+                ++frame->face;
+                frame->turn = 0;
+            }
+            frames[depth + 1] = (search_frame_t) {
+                .p = frame->next_p, .o = frame->next_o,
+                .distance = frame->next_distance,
+                .previous_face = (uint8_t) face
+            };
+            ++depth;
+        }
+    }
+    return -1;
+}
+
+static int is_solved(const state_t *state)
+{
+    for (unsigned i = 0; i < CUBIES; ++i)
+        if (state->p[i] != i || state->o[i] != 0)
+            return 0;
+    return 1;
+}
+
+/* Returns -2 for invalid input, -1 for a failed search/replay, or its length.
+ * Fixed frames make this a single-query, non-reentrant interface.
  */
+int solve_cube(const char *input, solution_t *solution)
+{
+    state_t state;
+    if (!input || !solution || !parse_state(input, &state))
+        return -2;
+    int length = search(encode_state(&state), solution);
+    if (length < 0)
+        return -1;
+    for (unsigned i = 0; i < solution->length; ++i)
+        state = apply_move(state, solution->moves[i]);
+    return is_solved(&state) ? length : -1;
+}
+
+/* Buffered output errors may surface only at the flush. */
 static int output_failed(void)
 {
     return fflush(stdout) != 0 || ferror(stdout);
 }
 
-static int self_test(void)
-{
-    const state_t solved = {{0, 1, 2, 3, 4, 5, 6}, {0}};
-    state_t state;
-    for (uint8_t move = 0; move < MOVES; ++move) {
-        state = solved;
-        state = apply_move(state, move);
-        state = apply_move(state, inverse_move[move]);
-        if (memcmp(&solved, &state, sizeof solved))
-            return 0;
-    }
-    for (uint32_t rank = 0; rank < STATES; ++rank) {
-        unrank_state(rank, &state);
-        if (!valid(&state) || rank_state(&state) != rank)
-            return 0;
-    }
-    return 1;
-}
 
 int main(int argc, char **argv)
 {
-    state_t state;
-    uint8_t diameter;
-    if (argc == 2 && !strcmp(argv[1], "--self-test")) {
-        if (!self_test()) {
-            fputs("self-test failed\n", stderr);
-            return 1;
-        }
-        uint8_t *table = build_table(&diameter);
-        if (!table) {
-            fputs("could not build complete state table\n", stderr);
-            return 1;
-        }
-        free(table);
-        if (diameter != 11) {
-            fputs("BFS check failed\n", stderr);
-            return 1;
-        }
-        puts("3674160 states; diameter 11");
-        return output_failed();
-    }
-    if (argc != 2 || !parse_state(argv[1], &state)) {
-        /* C99 5.1.2.2.1 lets argv[0] be null when argc is 0. */
+    solution_t solution;
+    int length = argc == 2 ? solve_cube(argv[1], &solution) : -2;
+    if (length == -2) {
         fprintf(stderr, "usage: %s PPPPPPPOOOOOOO\n",
                 argc > 0 && argv[0] ? argv[0] : "solver");
         return 2;
     }
-    uint8_t *table = build_table(&diameter);
-    if (!table) {
-        fputs("could not build complete state table\n", stderr);
+    if (length < 0) {
+        fputs("search or solution replay failed\n", stderr);
         return 1;
     }
-    const char *separator = "";
-    for (uint32_t rank = rank_state(&state); rank; rank = rank_state(&state)) {
-        uint8_t move = table[rank];
-        printf("%s%s", separator, move_names[move]);
-        separator = " ";
-        state = apply_move(state, move);
-    }
+    for (unsigned i = 0; i < solution.length; ++i)
+        printf("%s%s", i ? " " : "", move_names[solution.moves[i]]);
     putchar('\n');
-    free(table);
     return output_failed();
 }
