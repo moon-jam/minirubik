@@ -18,6 +18,12 @@ RV32_DATA := $(BUILD)/solver-data.inc
 RV32_ELF := $(BUILD)/solver-gcc-O2.elf
 RV32_CHECK := $(BUILD)/rv32-check
 ASM_ELF := $(BUILD)/solver-rv32i.elf
+ASM_LED_ELF := $(BUILD)/solver-rv32i-led.elf
+# Values exported by the user's 35x25 Ripes LED Matrix.
+LED_BASE ?= 0xf0000000
+LED_SIZE ?= 3500
+LED_WIDTH ?= 35
+LED_HEIGHT ?= 25
 HOST_TABLE_SOURCES := experiments/search/cube.c experiments/search/tables.c \
                       experiments/search/bounds.c
 HOST_TABLE_HEADERS := experiments/search/cube.h experiments/search/tables.h \
@@ -27,7 +33,8 @@ HOST_TABLE_HEADERS := experiments/search/cube.h experiments/search/tables.h \
 INVALID_STATES := 1234567111111 123456711111111 02345671111111 82345671111111 \
 	12345671111110 12345671111114 1234567111111a 11345671111111 12345671111112
 
-.PHONY: all check verify check-rv32 check-rv32-quick check-asm check-asm-quick prove clean indent
+.PHONY: all check verify check-rv32 check-rv32-quick check-asm check-asm-quick \
+        asm-led prove clean indent
 
 all: solver mini
 
@@ -59,9 +66,10 @@ $(RV32_ASM): solver.c $(TABLES)
 	$(CROSS_CC) -O2 -march=rv32i -mabi=ilp32 -ffreestanding \
 		-DRV32I_REFERENCE -I$(BUILD) -S $< -o $@
 
-$(RV32_ELF): runner.s $(RV32_ASM)
+$(RV32_ELF): runner.s $(RV32_ASM) Makefile
 	$(CROSS_CC) -march=rv32i -mabi=ilp32 -nostdlib -nostartfiles \
-		-Wl,--no-relax,-e,_start $^ -o $@
+		-Wa,--defsym,RENDER=0 -Wl,--no-relax,-e,_start \
+		runner.s $(RV32_ASM) -o $@
 
 # Read-only host-generated data for the hand-written assembly.
 $(RV32_DATA): $(RV32_ASM)
@@ -80,9 +88,20 @@ check-rv32: $(RV32_ELF) $(RV32_CHECK) $(VECTORS)
 check-rv32-quick: $(RV32_ELF) $(RV32_CHECK)
 	./$(RV32_CHECK) quick "$(RIPES_BIN)" $(RV32_ELF) $(BUILD)/rv32-quick
 
-$(ASM_ELF): runner.s solver-rv32i.s $(RV32_DATA)
+$(ASM_ELF): runner.s solver-rv32i.s $(RV32_DATA) Makefile
 	$(CROSS_CC) -march=rv32i -mabi=ilp32 -nostdlib -nostartfiles \
-		-Wl,--no-relax,-e,_start runner.s solver-rv32i.s -o $@
+		-Wa,--defsym,RENDER=0 -Wl,--no-relax,-e,_start \
+		runner.s solver-rv32i.s -o $@
+
+# Always rebuild: the GUI's exported device values can change between runs.
+asm-led: runner.s solver-rv32i.s $(RV32_DATA)
+	$(CROSS_CC) -march=rv32i -mabi=ilp32 -nostdlib -nostartfiles \
+		-Wa,--defsym,RENDER=1 \
+		-Wa,--defsym,LED_MATRIX_0_BASE=$(LED_BASE) \
+		-Wa,--defsym,LED_MATRIX_0_SIZE=$(LED_SIZE) \
+		-Wa,--defsym,LED_MATRIX_0_WIDTH=$(LED_WIDTH) \
+		-Wa,--defsym,LED_MATRIX_0_HEIGHT=$(LED_HEIGHT) \
+		-Wl,--no-relax,-e,_start runner.s solver-rv32i.s -o $(ASM_LED_ELF)
 
 check-asm: $(ASM_ELF) $(RV32_CHECK) $(VECTORS)
 	./$(RV32_CHECK) full "$(RIPES_BIN)" $(ASM_ELF) $(BUILD)/hand-full
