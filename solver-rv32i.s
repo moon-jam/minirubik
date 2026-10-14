@@ -392,10 +392,7 @@ search_pass:
     sb zero, 11(s5)
     sb s6, 14(s5)
 search_node:
-    # Recover frames[depth]; depth*16 uses a shift, not multiplication.
-    la s5, frames
-    slli t0, s4, 4
-    add s5, s5, t0
+    # s5 always points to frames[depth].
     lbu t0, 10(s5)            # face
     lbu t1, 9(s5)             # previous face
     bne t0, t1, search_face_ready
@@ -408,6 +405,7 @@ search_face_ready:
     blt t0, t1, search_try
     beqz s4, search_next_pass
     addi s4, s4, -1
+    addi s5, s5, -16
     j search_node
 search_try:
     # Save the face BEFORE advancing the parent cursor.
@@ -499,6 +497,7 @@ search_not_solved:
     sb zero, 11(t1)
     sb s9, 14(t1)
     addi s4, s4, 1
+    mv s5, t1
     j search_node
 search_next_pass:
     # A whole DFS pass failed; increase bound by one, at most MAX_DEPTH.
