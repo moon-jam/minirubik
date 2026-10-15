@@ -427,10 +427,8 @@ search_try:
     mv s8, t0                 # face for child and move
     lbu t1, 11(s5)
     bnez t1, search_continue_turn
-    lhu t2, 0(s5)
-    sh t2, 4(s5)
-    lhu t2, 2(s5)
-    sh t2, 6(s5)
+    lw t2, 0(s5)
+    sw t2, 4(s5)
     lbu t2, 8(s5)
     sb t2, 12(s5)
     lbu t2, 14(s5)
@@ -440,8 +438,9 @@ search_continue_turn:
     # represents R, then R2, then R' (or the corresponding other face).
     lhu a0, 4(s5)
     lhu a1, 6(s5)
-    mv a2, s8
-    slli t0, a2, 2
+
+    # Inlined quarter_rank with cached transition row addresses.
+    slli t0, s8, 2
     add t1, s0, t0
     lw t1, 0(t1)
     slli t2, a0, 1
@@ -452,8 +451,11 @@ search_continue_turn:
     slli t2, a1, 1
     add t1, t1, t2
     lhu a1, 0(t1)
+
     sh a0, 4(s5)
     sh a1, 6(s5)
+
+    # Inlined half_remainder with cached subgroup table addresses.
     slli t0, a0, 2
     add t1, s6, t0
     lw t1, 0(t1)
@@ -465,6 +467,7 @@ search_continue_turn:
     lbu a0, 0(t0)
     srl a0, a0, t2
     andi a0, a0, 3
+
     mv s9, a0                 # new remainder
     lbu t0, 13(s5)
     # Consecutive subgroup distances differ by +/-1. Convert mod-3
@@ -497,22 +500,24 @@ search_delta_done:
 search_advance:
     sb t0, 11(s5)
 search_estimate:
-    # Prune when child depth + heuristic exceeds current IDA* bound.
-    lhu a0, 4(s5)
-    srli t0, a0, 1
-    andi t1, a0, 1
-    slli t1, t1, 2
-    add t2, s11, t0
-    lbu a0, 0(t2)
-    srl a0, a0, t1
-    andi a0, a0, 15
-    lbu t0, 12(s5)
-    bge a0, t0, search_max_ready
-    mv a0, t0
-search_max_ready:
+    # Check subgroup distance before accessing the permutation table.
+    # t2 still holds next_distance from search_delta_done.
     addi t0, s4, 1
+    add t1, t0, t2
+    blt s3, t1, search_node
+
+    # Inlined permutation_bound with a cached distance table address.
+    lhu a0, 4(s5)
+    srli t1, a0, 1
+    andi t2, a0, 1
+    slli t2, t2, 2
+    add t1, s11, t1
+    lbu a0, 0(t1)
+    srl a0, a0, t2
+    andi a0, a0, 15
     add t1, t0, a0
     blt s3, t1, search_node
+
     add t1, s2, s4
     sb s10, 1(t1)
     lhu t1, 4(s5)
@@ -526,10 +531,8 @@ search_not_solved:
     # A non-goal at depth==bound cannot have a feasible child.
     beq t0, s3, search_node
     addi t1, s5, 16
-    lhu t2, 4(s5)
-    sh t2, 0(t1)
-    lhu t2, 6(s5)
-    sh t2, 2(t1)
+    lw t2, 4(s5)
+    sw t2, 0(t1)
     lbu t2, 12(s5)
     sb t2, 8(t1)
     sb s8, 9(t1)

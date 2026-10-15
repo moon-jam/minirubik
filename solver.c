@@ -380,10 +380,9 @@ static int search(coordinate_t root, solution_t *solution)
                 ++frame->face;
                 frame->turn = 0;
             }
-            unsigned h = permutation_bound(frame->next_p);
-            if (frame->next_distance > h)
-                h = frame->next_distance;
-            if (depth + 1 + h > bound)
+            if (depth + 1 + frame->next_distance > bound)
+                continue;
+            if (depth + 1 + permutation_bound(frame->next_p) > bound)
                 continue;
             solution->moves[depth] = move;
             if (frame->next_p == 0 && frame->next_o == 0) {
