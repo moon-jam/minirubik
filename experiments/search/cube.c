@@ -6,6 +6,11 @@
 void cube_build_transitions(uint16_t pt[3][CUBE_PERMUTATIONS],
                             uint16_t ot[3][CUBE_ORIENTATIONS])
 {
+    /* A move permutes positions independently of their orientations, and
+     * updates orientations independently of cubie labels. Enumerate each
+     * coordinate separately using the frozen baseline's unrank/move/rank
+     * operations: zero orientation for pt, identity permutation for ot.
+     * This gives 3*5040 + 3*729 entries instead of a full-state move table. */
     state_t s, t;
     for (unsigned p = 0; p < PERMUTATIONS; p++) {
         unrank_state(p * 729, &s);
