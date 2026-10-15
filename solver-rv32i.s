@@ -375,22 +375,36 @@ search_start:
     mv a0, s0
     call permutation_bound
     mv s3, a0                 # bound
-    bge s3, s7, search_pass
+    bge s3, s7, search_prepare
     mv s3, s7
+search_prepare:
+    sh s0, 0(sp)              # root p
+    sh s1, 2(sp)              # root o
+    sb s6, 4(sp)              # root remainder
+    sb s7, 5(sp)              # root distance
+    la s0, permutation_rows
+    la s1, orientation_rows
+    la s6, subgroup_offset
+    la s7, subgroup_remainder
+    la s11, permutation_distance
 search_pass:
     # Start a new depth-first traversal with the current f=g+h limit.
     li t0, 11
     bgt s3, t0, search_failed
     li s4, 0                  # depth
     la s5, frames
-    sh s0, 0(s5)
-    sh s1, 2(s5)
-    sb s7, 8(s5)
+    lhu t0, 0(sp)
+    sh t0, 0(s5)
+    lhu t0, 2(sp)
+    sh t0, 2(s5)
+    lbu t0, 5(sp)
+    sb t0, 8(s5)
     li t0, 255
     sb t0, 9(s5)
     sb zero, 10(s5)
     sb zero, 11(s5)
-    sb s6, 14(s5)
+    lbu t0, 4(sp)
+    sb t0, 14(s5)
 search_node:
     # s5 always points to frames[depth].
     lbu t0, 10(s5)            # face
@@ -427,10 +441,30 @@ search_continue_turn:
     lhu a0, 4(s5)
     lhu a1, 6(s5)
     mv a2, s8
-    call quarter_rank
+    slli t0, a2, 2
+    add t1, s0, t0
+    lw t1, 0(t1)
+    slli t2, a0, 1
+    add t1, t1, t2
+    lhu a0, 0(t1)
+    add t1, s1, t0
+    lw t1, 0(t1)
+    slli t2, a1, 1
+    add t1, t1, t2
+    lhu a1, 0(t1)
     sh a0, 4(s5)
     sh a1, 6(s5)
-    call half_remainder
+    slli t0, a0, 2
+    add t1, s6, t0
+    lw t1, 0(t1)
+    add t1, t1, a1
+    andi t2, t1, 3
+    slli t2, t2, 1
+    srli t1, t1, 2
+    add t0, s7, t1
+    lbu a0, 0(t0)
+    srl a0, a0, t2
+    andi a0, a0, 3
     mv s9, a0                 # new remainder
     lbu t0, 13(s5)
     # Consecutive subgroup distances differ by +/-1. Convert mod-3
@@ -465,7 +499,13 @@ search_advance:
 search_estimate:
     # Prune when child depth + heuristic exceeds current IDA* bound.
     lhu a0, 4(s5)
-    call permutation_bound
+    srli t0, a0, 1
+    andi t1, a0, 1
+    slli t1, t1, 2
+    add t2, s11, t0
+    lbu a0, 0(t2)
+    srl a0, a0, t1
+    andi a0, a0, 15
     lbu t0, 12(s5)
     bge a0, t0, search_max_ready
     mv a0, t0
